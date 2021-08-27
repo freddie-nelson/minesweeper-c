@@ -14,7 +14,6 @@ TTF_Font *FONT;
 
 const uint8_t STATE_BLANK = 0;
 const uint8_t STATE_MINE = 9;
-const uint8_t STATE_FLAG = 10;
 const uint8_t STATE_EMPTY_NEIGHBOUR = 255;
 
 bool gameOver = false;
@@ -25,6 +24,7 @@ struct Tile
   uint8_t y;
   uint8_t state;
   bool revealed;
+  bool flag;
 };
 
 struct Tile GRID[GRID_SIZE][GRID_SIZE];
@@ -205,13 +205,12 @@ void tileClicked(int r, int c)
   }
 }
 
-void placeFlag()
+void placeFlag(int r, int c)
 {
-  int x, y;
-  SDL_GetMouseState(&x, &y);
-
-  int r = y / (SCREEN_SIZE / GRID_SIZE);
-  int c = x / (SCREEN_SIZE / GRID_SIZE);
+  if (!GRID[r][c].revealed)
+  {
+    GRID[r][c].flag = !GRID[r][c].flag;
+  }
 }
 
 void drawGrid(SDL_Window *window, SDL_Renderer *renderer)
@@ -256,6 +255,11 @@ void drawGrid(SDL_Window *window, SDL_Renderer *renderer)
           SDL_SetRenderDrawColor(renderer, 0xCC, 0xCC, 0xCC, 0xFF);
           SDL_RenderFillRect(renderer, &rect);
         }
+      }
+      else if (GRID[r][c].flag)
+      {
+        SDL_SetRenderDrawColor(renderer, 0xFF, 0x00, 0x00, 0xFF);
+        SDL_RenderFillRect(renderer, &rect);
       }
     }
   }
@@ -317,22 +321,26 @@ int main()
       switch (e.type)
       {
       case SDL_QUIT:
+      {
+
         quit = true;
         break;
+      }
       case SDL_MOUSEBUTTONUP:
-        int x;
-        int y;
-        Uint32 btn = SDL_GetMouseState(&x, &y);
+      {
+        int x, y;
+        SDL_GetMouseState(&x, &y);
 
         int r = y / (SCREEN_SIZE / GRID_SIZE);
         int c = x / (SCREEN_SIZE / GRID_SIZE);
 
-        if (btn & SDL_BUTTON(1))
+        if (e.button.button == SDL_BUTTON_LEFT && !GRID[r][c].flag)
           tileClicked(r, c);
-        else
-          (btn & SDL_BUTTON(3))
-              placeFlag();
+        else if (e.button.button == SDL_BUTTON_RIGHT)
+          placeFlag(r, c);
+
         break;
+      }
       }
     }
 
