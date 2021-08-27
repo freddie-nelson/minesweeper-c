@@ -7,14 +7,17 @@
 #include <stdlib.h>
 
 const int SCREEN_SIZE = 500;
-const int GRID_SIZE = 25; // 0 - 256
-const int MINE_ODDS = 12;
+const int GRID_SIZE = 20; // 0 - 256
+const int MINE_ODDS = 6;
 
 TTF_Font *FONT;
 
 const uint8_t STATE_BLANK = 0;
 const uint8_t STATE_MINE = 9;
 const uint8_t STATE_FLAG = 10;
+const uint8_t STATE_EMPTY_NEIGHBOUR = 255;
+
+bool gameOver = false;
 
 struct Tile
 {
@@ -35,6 +38,11 @@ void getNeighbours(uint8_t r, uint8_t c, struct Tile neighbours[8])
 {
   // neighbours array layout
   // tl = 0, t = 1, tr = 2, l = 3, r = 4, bl = 5, b = 6, br = 7
+
+  for (size_t i = 0; i < 8; i++)
+  {
+    neighbours[i].state = STATE_EMPTY_NEIGHBOUR;
+  }
 
   // right
   bool right = false;
@@ -120,7 +128,7 @@ void setupGrid()
 
       for (size_t i = 0; i < sizeof(neighbours); i++)
       {
-        if (sizeof(neighbours[i]) > 0 && neighbours[i].state == STATE_MINE)
+        if (neighbours[i].state != STATE_EMPTY_NEIGHBOUR && neighbours[i].state == STATE_MINE)
         {
           GRID[r][c].state++;
         }
@@ -129,31 +137,86 @@ void setupGrid()
   }
 }
 
-/*
-- x, y: upper left corner.
-- texture, rect: outputs.
-*/
-void getTextAndRect(SDL_Renderer *renderer, int x, int y, char *text, SDL_Texture **texture, SDL_Rect *rect)
+SDL_Texture *numTextures[8];
+
+void setupMineNumbers(SDL_Renderer *renderer)
 {
-  int text_width;
-  int text_height;
   SDL_Surface *surface;
   SDL_Color textColor = {0, 0, 255, 0};
 
-  surface = TTF_RenderText_Solid(FONT, text, textColor);
-  *texture = SDL_CreateTextureFromSurface(renderer, surface);
-  text_width = surface->w;
-  text_height = surface->h;
+  for (uint8_t i = 0; i < 8; i++)
+  {
+    char text[1];
+    sprintf(text, "%u", i + 1);
+
+    surface = TTF_RenderText_Solid(FONT, text, textColor);
+    if (surface == NULL)
+    {
+      printf(" %s ", SDL_GetError());
+    }
+
+    numTextures[i] = SDL_CreateTextureFromSurface(renderer, surface);
+    if (numTextures[i] == NULL)
+    {
+      printf(" %s ", SDL_GetError());
+    }
+  }
+
   SDL_FreeSurface(surface);
-  rect->x = x + (SCREEN_SIZE / GRID_SIZE - text_width) / 2;
-  rect->y = y + (SCREEN_SIZE / GRID_SIZE - text_height) / 2;
-  rect->w = text_width;
-  rect->h = text_height;
+}
+
+void revealNeighbours(int r, int c)
+{
+  struct Tile neighbours[8];
+  getNeighbours(r, c, neighbours);
+
+  for (size_t i = 0; i < 8; i++)
+  {
+    if (neighbours[i].state == STATE_EMPTY_NEIGHBOUR || neighbours[i].revealed)
+      continue;
+
+    GRID[neighbours[i].y][neighbours[i].x].revealed = true;
+
+    if (neighbours[i].state == STATE_BLANK)
+    {
+      revealNeighbours(neighbours[i].y, neighbours[i].x);
+    }
+  }
+}
+
+void tileClicked(int r, int c)
+{
+  struct Tile *tile = &GRID[r][c];
+
+  switch (tile->state)
+  {
+  case STATE_MINE:
+    gameOver = true;
+    tile->revealed = true;
+    break;
+  case STATE_BLANK:
+    // recursively reveal all reachable blanks
+    tile->revealed = true;
+    revealNeighbours(r, c);
+    break;
+  default:
+    tile->revealed = true;
+    break;
+  }
+}
+
+void placeFlag()
+{
+  int x, y;
+  SDL_GetMouseState(&x, &y);
+
+  int r = y / (SCREEN_SIZE / GRID_SIZE);
+  int c = x / (SCREEN_SIZE / GRID_SIZE);
 }
 
 void drawGrid(SDL_Window *window, SDL_Renderer *renderer)
 {
-  SDL_SetRenderDrawColor(renderer, 0xCC, 0xCC, 0xCC, 0xFF);
+  SDL_SetRenderDrawColor(renderer, 0x99, 0x99, 0x99, 0xFF);
   SDL_RenderClear(renderer);
 
   for (size_t r = 0; r < GRID_SIZE; r++)
@@ -166,52 +229,33 @@ void drawGrid(SDL_Window *window, SDL_Renderer *renderer)
       rect.x = c * rect.w;
       rect.y = r * rect.h;
 
-      if (GRID[r][c].state == STATE_MINE)
+      if (GRID[r][c].revealed)
       {
-        SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0xFF);
-        SDL_RenderFillRect(renderer, &rect);
-      }
-      else if (GRID[r][c].state > STATE_BLANK && GRID[r][c].state < STATE_MINE)
-      {
-        SDL_SetRenderDrawColor(renderer, 0xCC, 0xCC, 0xCC, 0xFF);
-        SDL_RenderFillRect(renderer, &rect);
-
-        // create mines text
-        char *mines = "1";
-        switch (GRID[r][c].state)
+        if (GRID[r][c].state == STATE_MINE)
         {
-        case 2:
-          mines = "2";
-          break;
-        case 3:
-          mines = "3";
-          break;
-        case 4:
-          mines = "4";
-          break;
-        case 5:
-          mines = "5";
-          break;
-        case 6:
-          mines = "6";
-          break;
-        case 7:
-          mines = "7";
-          break;
-        case 8:
-          mines = "8";
-          break;
-        default:
-          break;
+          SDL_SetRenderDrawColor(renderer, 0x00, 0x00, 0x00, 0xFF);
+          SDL_RenderFillRect(renderer, &rect);
         }
+        else if (GRID[r][c].state > STATE_BLANK && GRID[r][c].state < STATE_MINE)
+        {
+          SDL_SetRenderDrawColor(renderer, 0xCC, 0xCC, 0xCC, 0xFF);
+          SDL_RenderFillRect(renderer, &rect);
 
-        SDL_Rect textRect;
-        SDL_Texture *texture;
-        getTextAndRect(renderer, rect.x, rect.y, mines, &texture, &textRect);
+          // render mines text
+          SDL_Rect textRect;
+          textRect.w = SCREEN_SIZE / GRID_SIZE;
+          textRect.h = SCREEN_SIZE / GRID_SIZE;
+          textRect.x = rect.x;
+          textRect.y = rect.y;
 
-        // render text
-        if (SDL_RenderCopy(renderer, texture, NULL, &textRect) < 0)
-          printf(" %s ", SDL_GetError());
+          if (SDL_RenderCopy(renderer, numTextures[GRID[r][c].state - 1], NULL, &textRect) < 0)
+            printf(" RENDERCOPY_ERROR: %s ", SDL_GetError());
+        }
+        else
+        {
+          SDL_SetRenderDrawColor(renderer, 0xCC, 0xCC, 0xCC, 0xFF);
+          SDL_RenderFillRect(renderer, &rect);
+        }
       }
     }
   }
@@ -264,13 +308,32 @@ int main()
   SDL_Event e;
 
   setupGrid();
+  setupMineNumbers(renderer);
 
-  while (!quit)
+  while (!quit && !gameOver)
   {
     while (SDL_PollEvent(&e) != 0)
     {
-      if (e.type == SDL_QUIT)
+      switch (e.type)
+      {
+      case SDL_QUIT:
         quit = true;
+        break;
+      case SDL_MOUSEBUTTONUP:
+        int x;
+        int y;
+        Uint32 btn = SDL_GetMouseState(&x, &y);
+
+        int r = y / (SCREEN_SIZE / GRID_SIZE);
+        int c = x / (SCREEN_SIZE / GRID_SIZE);
+
+        if (btn & SDL_BUTTON(1))
+          tileClicked(r, c);
+        else
+          (btn & SDL_BUTTON(3))
+              placeFlag();
+        break;
+      }
     }
 
     drawGrid(window, renderer);
